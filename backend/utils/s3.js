@@ -1,27 +1,25 @@
-const AWS = require('aws-sdk');
+const cloudinary = require('cloudinary').v2;
 const path = require('path');
 const fs = require('fs');
 
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-async function uploadFileToS3(localFilePath, s3Folder = '') {
+async function uploadFileToCloudinary(localFilePath, folder = '') {
   const fileContent = fs.readFileSync(localFilePath);
   const fileName = path.basename(localFilePath);
-  const s3Key = s3Folder ? `${s3Folder}/${fileName}` : fileName;
+  const cloudinaryFolder = folder ? `${folder}/` : '';
 
-  const params = {
-    Bucket: process.env.AWS_S3_BUCKET,
-    Key: s3Key,
-    Body: fileContent,
-    ACL: 'public-read'
-  };
+  const result = await cloudinary.uploader.upload(localFilePath, {
+    folder: cloudinaryFolder,
+    public_id: fileName,
+    resource_type: 'auto'
+  });
 
-  await s3.upload(params).promise();
-  return `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+  return result.secure_url;
 }
 
-module.exports = { uploadFileToS3 };
+module.exports = { uploadFileToCloudinary };

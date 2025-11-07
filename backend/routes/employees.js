@@ -11,24 +11,26 @@ const xlsx = require('xlsx');
 const crypto = require('crypto');
 const EmailService = require('../services/emailService');
 const jwt = require('jsonwebtoken'); // For reset token (if not already imported)
-
-// Update multer config to allow .csv and .xlsx
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Save images in uploads/images subfolder
-    const imagesDir = path.join('uploads', 'images');
-    if (!fs.existsSync(imagesDir)) {
-      fs.mkdirSync(imagesDir, { recursive: true });
-    }
-    cb(null, imagesDir);
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_KEY,
+  api_secret: process.env.CLOUD_SECRET
+});
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    let folder = 'profile_images';
+    if (file.mimetype === 'application/pdf') folder = 'pdfs';
+    return {
+      folder,
+      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'],
+      public_id: Date.now() + '-' + file.originalname.replace(/\s+/g, '_')
+    };
   }
 });
-
-// Remove fileFilter that restricts to CSV only
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
 // Get all employees (allow all authenticated users for autocomplete)
 router.get('/all', auth, async (req, res) => {
@@ -660,7 +662,7 @@ router.post('/', auth, async (req, res) => {
         birth_of_date,
         first_reporting_manager_emp_code,
         second_reporting_manager_emp_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         emp_code,
         username,

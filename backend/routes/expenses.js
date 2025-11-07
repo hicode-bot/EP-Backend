@@ -11,7 +11,26 @@ const EmailService = require('../services/emailService');
 const { getExpenseStatusEmailTemplate, getExpenseSubmissionTemplate } = require('../utils/emailTemplates');
 const xlsx = require('xlsx'); // Add at top
 const { getExpenseResubmissionTemplate } = require('../utils/emailTemplates'); // Add at the top
-const { uploadFileToS3 } = require('../utils/s3'); // Add at the top
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_KEY,
+  api_secret: process.env.CLOUD_SECRET
+});
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    let folder = 'receipts';
+    if (file.mimetype === 'application/pdf') folder = 'pdfs';
+    return {
+      folder,
+      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'],
+      public_id: Date.now() + '-' + file.originalname.replace(/\s+/g, '_')
+    };
+  }
+});
+const upload = multer({ storage });
 
 // Add at the top with other constants
 const EXPENSE_STATUS = {
@@ -30,29 +49,6 @@ const ALLOWANCE_SCOPES = {
   DAILY_NON_METRO: 'Daily Allowance Non-Metro',
   SITE_FIXED: 'Site Allowance'
 };
-
-// Configure multer for file upload
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Save receipts and PDFs in subfolders
-    let uploadDir = 'uploads';
-    if (file.fieldname === 'hotelReceipt' || file.fieldname === 'foodReceipt' || file.fieldname === 'travelReceipt') {
-      uploadDir = path.join('uploads', 'receipts');
-    } else if (file.fieldname === 'specialApproval') {
-      uploadDir = path.join('uploads', 'pdfs');
-    }
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
-
-// Update multer config to accept hotelReceipt and foodReceipt
-const upload = multer({ storage: storage });
 
 // Add this helper function
 function getCriticalTabsForRole(role) {
@@ -94,14 +90,6 @@ function toMysqlDate(val) {
   }
   return null;
 }
-
-// Add this helper function for S3 upload
-const uploadAndGetS3Url = async (file, folder) => {
-  if (!file) return null;
-  const s3Url = await uploadFileToS3(file.path, folder);
-  fs.unlinkSync(file.path); // Remove local file after upload
-  return s3Url;
-};
 
 // Get current employee details
 router.get('/employees/current', auth, async (req, res) => {
@@ -929,12 +917,6 @@ router.post('/', auth, upload.fields([
       return res.status(400).json({ message: 'Special Approval must be a PDF file.' });
     }
 
-    // Upload files to S3 and get URLs
-    const travelReceiptS3 = await uploadAndGetS3Url(req.files?.travelReceipt?.[0], 'receipts');
-    const hotelReceiptS3 = await uploadAndGetS3Url(req.files?.hotelReceipt?.[0], 'receipts');
-    const foodReceiptS3 = await uploadAndGetS3Url(req.files?.foodReceipt?.[0], 'receipts');
-    const specialApprovalS3 = await uploadAndGetS3Url(req.files?.specialApproval?.[0], 'pdfs');
-
     // Insert expense form
     const [expenseResult] = await connection.query(
       `INSERT INTO expense_form (
@@ -948,10 +930,10 @@ router.post('/', auth, upload.fields([
         formData.emp_id,
         projectId,
         claimAmount, // <-- use recalculated value
-        travelReceiptS3,
-        hotelReceiptS3,
-        foodReceiptS3,
-        specialApprovalS3 // <-- new field
+        req.files?.travelReceipt?.[0]?.path,
+        req.files?.hotelReceipt?.[0]?.path,
+        req.files?.foodReceipt?.[0]?.path,
+        req.files?.specialApproval?.[0]?.path // <-- new field
       ]
     );
 
@@ -1304,19 +1286,13 @@ router.put('/:expenseId', auth, upload.fields([
     await deleteReceiptIfNeeded('FoodReceipt', 'food_receipt_path');
     await deleteReceiptIfNeeded('SpecialApproval', 'special_approval_path');
 
-    // Upload files to S3 and get URLs
-    const travelReceiptS3 = await uploadAndGetS3Url(req.files?.travelReceipt?.[0], 'receipts');
-    const hotelReceiptS3 = await uploadAndGetS3Url(req.files?.hotelReceipt?.[0], 'receipts');
-    const foodReceiptS3 = await uploadAndGetS3Url(req.files?.foodReceipt?.[0], 'receipts');
-    const specialApprovalS3 = await uploadAndGetS3Url(req.files?.specialApproval?.[0], 'pdfs');
-
     // Update expense form
     const updateFields = [];
     const updateValues = [];
-    if (travelReceiptS3) { updateFields.push('travel_receipt_path = ?'); updateValues.push(travelReceiptS3); }
-    if (hotelReceiptS3) { updateFields.push('hotel_receipt_path = ?'); updateValues.push(hotelReceiptS3); }
-    if (foodReceiptS3) { updateFields.push('food_receipt_path = ?'); updateValues.push(foodReceiptS3); }
-    if (specialApprovalS3) { updateFields.push('special_approval_path = ?'); updateValues.push(specialApprovalS3); }
+    if (req.files?.travelReceipt?.[0]?.path) { updateFields.push('travel_receipt_path = ?'); updateValues.push(req.files.travelReceipt[0].path); }
+    if (req.files?.hotelReceipt?.[0]?.path) { updateFields.push('hotel_receipt_path = ?'); updateValues.push(req.files.hotelReceipt[0].path); }
+    if (req.files?.foodReceipt?.[0]?.path) { updateFields.push('food_receipt_path = ?'); updateValues.push(req.files.foodReceipt[0].path); }
+    if (req.files?.specialApproval?.[0]?.path) { updateFields.push('special_approval_path = ?'); updateValues.push(req.files.specialApproval[0].path); }
     if (updateFields.length) {
       await connection.query(
         `UPDATE expense_form SET ${updateFields.join(', ')}, 

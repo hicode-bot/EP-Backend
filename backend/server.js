@@ -14,6 +14,8 @@ const allowanceRoutes = require('./routes/allowance');
 
 const auth = require('./middleware/auth');
 const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const app = express();
 
@@ -60,30 +62,26 @@ db.connect((err) => {
   devLog('Connected to MySQL database');
 });
 
-// File upload configuration
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // Save receipts and PDFs in subfolders
-    let uploadDir = 'uploads';
-    if (file.fieldname === 'hotelReceipt' || file.fieldname === 'foodReceipt' || file.fieldname === 'travelReceipt') {
-      uploadDir = path.join('uploads', 'receipts');
-    } else if (file.fieldname === 'specialApproval') {
-      uploadDir = path.join('uploads', 'pdfs');
-    }
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_KEY,
+  api_secret: process.env.CLOUD_SECRET
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => {
+    let folder = 'profile_images';
+    if (file.mimetype === 'application/pdf') folder = 'pdfs';
+    return {
+      folder: folder,
+      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'],
+      public_id: Date.now() + '-' + file.originalname.replace(/\s+/g, '_')
+    };
   }
 });
 
 const upload = multer({ storage: storage });
-
-// Serve uploaded files
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Register route handlers
 app.use('/api/auth', authRoutes);

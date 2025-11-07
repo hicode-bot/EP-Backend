@@ -108,6 +108,9 @@ app.post('/api/expenses/submit', auth, upload.fields([
       return res.status(500).json({ error: 'Transaction error' });
     }
 
+    // Use Cloudinary URL for travel_receipt_path
+    const travelReceiptUrl = files.travelReceipt ? files.travelReceipt[0].path || files.travelReceipt[0].url : null;
+
     // Insert into expense_form table
     const expenseQuery = `
       INSERT INTO expense_form (
@@ -129,7 +132,7 @@ app.post('/api/expenses/submit', auth, upload.fields([
       expenseData.date_of_return_journey_from,
       expenseData.date_of_return_journey_to,
       expenseData.claim_amount,
-      files.travelReceipt ? files.travelReceipt[0].path : null
+      travelReceiptUrl
     ], (err, result) => {
       if (err) {
         return db.rollback(() => {
@@ -191,10 +194,12 @@ app.get('/api/expenses/projects/search', auth, (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  // Improved error logging for debugging
   if (process.env.NODE_ENV !== 'production') {
-    console.error(err.stack);
+    console.error('Error:', err);
+    if (err && err.stack) console.error(err.stack);
   }
-  res.status(500).json({ message: 'Something broke!' });
+  res.status(500).json({ message: 'Something broke!', error: err && err.message ? err.message : err });
 });
 
 // Start server
